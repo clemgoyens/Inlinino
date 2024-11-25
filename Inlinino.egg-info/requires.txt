@@ -1,0 +1,8 @@
+pyserial>=3.4
+numpy
+scipy
+PyQt5>=5.15
+pyqtgraph>=0.12.1
+pyACS
+pySatlantic
+pynmea2
