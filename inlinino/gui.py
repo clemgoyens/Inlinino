@@ -871,6 +871,13 @@ class DialogInstrumentSetup(QtGui.QDialog):
                 self.cfg['log_raw'] = True
             if 'log_products' not in self.cfg.keys():
                 self.cfg['log_products'] = True
+        elif self.cfg['module'] == 'lisst200X':
+            self.cfg['manufacturer'] = 'Sequoia'
+            self.cfg['model'] = 'LISST200'
+            if 'log_raw' not in self.cfg.keys():
+                self.cfg['log_raw'] = True
+            if 'log_products' not in self.cfg.keys():
+                self.cfg['log_products'] = True
         elif self.cfg['module'] == 'ontrak':
             self.cfg['model'] = self.combobox_model.currentText()
             self.cfg['relay0_enabled'] = self.checkbox_relay0_enabled.isChecked()

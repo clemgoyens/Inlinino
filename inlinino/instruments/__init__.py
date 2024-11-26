@@ -392,6 +392,10 @@ class Interface:
         pass
 
 
+    def readline(self):
+        return self._serial.readline()
+
+
 class SerialInterface(Interface):
     def __init__(self):
         self._serial = serial.Serial()
