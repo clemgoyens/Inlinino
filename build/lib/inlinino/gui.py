@@ -27,6 +27,7 @@ from inlinino.instruments.hyperbb import HyperBB
 from inlinino.instruments.hydroscat import HydroScat
 from inlinino.instruments.hypernav import HyperNav, read_manufacturer_pixel_registration
 from inlinino.instruments.lisst import LISST
+from inlinino.instruments.lisst200x import LISST200X
 from inlinino.instruments.nmea import NMEA
 from inlinino.instruments.ontrak import Ontrak, USBADUHIDInterface
 from inlinino.instruments.satlantic import Satlantic

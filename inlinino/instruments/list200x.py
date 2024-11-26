@@ -139,7 +139,7 @@ class LISST200X(Instrument):
         self.widget_active_timeseries_variables_selected = ()
 
 
-class LISSTParser:
+class LISST200XParser:
     ENCODING = 'utf-8'
     UNICODE_HANDLING = 'replace'
     LINE_ENDING = '\r\n'
