@@ -42,7 +42,7 @@ class LISST200X(Instrument):
 
         # Setup
         self.setup(cfg)
-        self._parser = LISSTParser()
+        self._parser = LISST200XParser()
 
     def setup(self, cfg):
         # Overload cfg with LISST specific parameters
