@@ -20,6 +20,7 @@ inlinino/instruments/hydroscat.py
 inlinino/instruments/hyperbb.py
 inlinino/instruments/hypernav.py
 inlinino/instruments/lisst.py
+inlinino/instruments/lisst200x.py
 inlinino/instruments/nmea.py
 inlinino/instruments/ontrak.py
 inlinino/instruments/satlantic.py

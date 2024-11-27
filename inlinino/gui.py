@@ -33,7 +33,7 @@ from inlinino.instruments.satlantic import Satlantic
 from inlinino.instruments.suna import SunaV1, SunaV2
 from inlinino.instruments.taratsg import TaraTSG
 from inlinino.instruments.lisst import LISSTParser
-from inlinino.instruments.lisst200x import LISST200XParser
+from inlinino.instruments.lisst200x import LISST200XParser, LISST200X
 from inlinino.widgets.aux_data import AuxDataWidget
 from inlinino.widgets.flow_control import FlowControlWidget
 from inlinino.widgets.hypernav import HyperNavCalWidget
@@ -1364,7 +1364,7 @@ class App(QtGui.QApplication):
             try:
                 instrument_class = {'generic': Instrument, 'acs': ACS, 'apogee': ApogeeQuantumSensor,
                                     'dataq': DATAQ, 'hydroscat': HydroScat, 'hyperbb': HyperBB, 'hypernav': HyperNav,
-                                    'lisst': LISST, 'nmea': NMEA,
+                                    'lisst': LISST, 'nmea': NMEA, 'lisst200x': LISST200X,
                                     'ontrak': Ontrak,
                                     'satlantic': Satlantic,
                                     'sunav1': SunaV1, 'sunav2': SunaV2, 'taratsg': TaraTSG}
