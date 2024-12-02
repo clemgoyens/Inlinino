@@ -4,9 +4,9 @@ from inlinino.instruments import Instrument
 from inlinino.log import Log
 
 try:
-    import aquasense.hydroscat
+    from aquasense.hydroscat import HydroScat as ASHydroScat
 except ImportError:
-    pass
+    ASHydroScat = None
 
 from datetime import datetime
 
@@ -35,7 +35,7 @@ class HydroScat(Instrument):
         self._io = io.TextIOWrapper(io.BufferedRWPair(self._interface._serial, self._interface._serial))
 
         # Instrument state machine
-        self.hydroscat: aquasense.hydroscat.HydroScat = None
+        self.hydroscat: ASHydroScat = None
         self.output_cal_header = None
         self.state = "IDLE"
         self.previous_state = None
@@ -53,6 +53,7 @@ class HydroScat(Instrument):
         self.widget_active_timeseries_variables_names = []
         self.widget_active_timeseries_variables_selected = []
         self.active_timeseries_variables_lock = Lock()
+        self.active_timeseries_variables_reset = False
         self.active_variables = None
 
         # Init Spectrum Plot widget
@@ -85,7 +86,10 @@ class HydroScat(Instrument):
         if errmsgs:
             raise ValueError('\n'.join(errmsgs))
 
-        self.hydroscat = aquasense.hydroscat.HydroScat(
+        if ASHydroScat is None:
+            raise ImportError("Package `aquasense` required.")
+
+        self.hydroscat = ASHydroScat(
                             cal_path=cfg["calibration_file"], in_out=self._io,
                             out=None, sep=",", serial_mode=False,
                             burst_mode=cfg["burst_mode"],
@@ -194,7 +198,9 @@ class HydroScat(Instrument):
                    for var_name in self.widget_active_timeseries_variables_selected]
         if self.active_timeseries_variables_lock.acquire(timeout=0.125):
             try:
-                self.signal.new_ts_data.emit(ts_data, timestamp)
+                self.signal.new_ts_data[object, float, bool].emit(ts_data, timestamp,
+                                                                  self.active_timeseries_variables_reset)
+                self.active_timeseries_variables_reset = False  # Reset here as potentially set by update_active_timeseries_variables
             finally:
                 self.active_timeseries_variables_lock.release()
         else:
@@ -224,11 +230,12 @@ class HydroScat(Instrument):
                 self.signal.packet_logged.emit()
 
 
-    def udpate_active_timeseries_variables(self, name, active):
+    def update_active_timeseries_variables(self, name, state):
         # ensure only one thread updates active timeseries variables
         if self.active_timeseries_variables_lock.acquire(timeout=0.25):
+            self.active_timeseries_variables_reset = True
             try:
-                self.active_variables[name] = active
+                self.active_variables[name] = state
                 self.widget_active_timeseries_variables_selected = \
                     [name for name in self.active_variables if self.active_variables[name]]
             finally:

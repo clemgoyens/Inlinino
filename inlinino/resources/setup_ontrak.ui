@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>742</width>
+    <width>808</width>
     <height>435</height>
    </rect>
   </property>
@@ -77,6 +77,11 @@
          <item>
           <property name="text">
            <string>ADU208</string>
+          </property>
+         </item>
+         <item>
+          <property name="text">
+           <string>ADU222</string>
           </property>
          </item>
         </widget>
@@ -325,7 +330,7 @@
             </property>
             <item>
              <property name="text">
-              <string>Switch</string>
+              <string>Switch (one-wire)</string>
              </property>
             </item>
             <item>
@@ -342,7 +347,12 @@
             </property>
             <item>
              <property name="text">
-              <string>Switch</string>
+              <string>Switch (one-wire)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Switch (two-wire)</string>
              </property>
             </item>
             <item>
@@ -359,7 +369,7 @@
             </property>
             <item>
              <property name="text">
-              <string>Switch</string>
+              <string>Switch (one-wire)</string>
              </property>
             </item>
             <item>
@@ -391,6 +401,9 @@
       <layout class="QVBoxLayout" name="verticalLayout_4">
        <item>
         <widget class="QGroupBox" name="group_box_flowmeters">
+         <property name="enabled">
+          <bool>true</bool>
+         </property>
          <property name="title">
           <string>Digital Input(s)</string>
          </property>

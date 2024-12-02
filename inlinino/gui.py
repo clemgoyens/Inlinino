@@ -106,8 +106,8 @@ class MainWindow(QtGui.QMainWindow):
         self.widget_metadata = None
         self.widgets = []
 
-    def add_widget(self, widget, secondary_dock=True):
-        self.widgets.append(widget(self.instrument))
+    def add_widget(self, widget, secondary_dock=True, widget_kwargs={}):
+        self.widgets.append(widget(self.instrument, **widget_kwargs))
         self.widgets[-1].layout.setContentsMargins(QtCore.QMargins(0, 0, 0, 0))
         if secondary_dock:
             self.docked_widget_secondary_layout.addWidget(self.widgets[-1])
@@ -138,28 +138,38 @@ class MainWindow(QtGui.QMainWindow):
         self.instrument.signal.packet_received.connect(self.on_packet_received)
         self.instrument.signal.packet_corrupted.connect(self.on_packet_corrupted)
         self.instrument.signal.packet_logged.connect(self.on_packet_logged)
-        self.instrument.signal.new_ts_data.connect(self.on_new_ts_data)
+        self.instrument.signal.new_ts_data[object, float].connect(self.on_new_ts_data)
+        self.instrument.signal.new_ts_data[object, float, bool].connect(self.on_new_ts_data)
         if self.instrument.signal.alarm is not None:
             self.instrument.signal.alarm.connect(self.on_data_timeout)
         if self.instrument.signal.alarm_custom is not None:
             self.instrument.signal.alarm_custom.connect(self.on_custom_alarm)
         # Set Widgets
-        available_widgets = ((AuxDataWidget, False),
-                             (FlowControlWidget, True),
-                             (HyperNavCalWidget, True),
-                             (MetadataWidget, True),
-                             (PumpControlWidget, True),
-                             (SelectChannelWidget, False))
+        available_widgets = {AuxDataWidget.__name__: (AuxDataWidget, False),
+                             FlowControlWidget.__name__: (FlowControlWidget, True),
+                             HyperNavCalWidget.__name__: (HyperNavCalWidget, True),
+                             MetadataWidget.__name__: (MetadataWidget, True),
+                             PumpControlWidget.__name__: (PumpControlWidget, True),
+                             SelectChannelWidget.__name__: (SelectChannelWidget, False)}
         primary_vertical_spacer, secondary_vertical_spacer = True, True
-        for widget, secondary_dock in available_widgets:
-            if getattr(self.instrument, f'widget_{widget.__snake_name__[:-7]}_enabled') or\
-                    widget.__name__ in self.instrument.widgets_to_load:
+        for widget, secondary_dock in available_widgets.values():
+            id = f'widget_{widget.__snake_name__[:-7]}_enabled'
+            if hasattr(self.instrument, id) and getattr(self.instrument, id):
                 self.add_widget(widget, secondary_dock)
                 if widget.expanding:
                     if secondary_dock:
                         secondary_vertical_spacer = False
                     else:
                         primary_vertical_spacer = False
+        # Add same widget multiple times
+        for widget_key, widget_kwargs in zip(self.instrument.widgets_to_load, self.instrument.widgets_to_load_kwargs):
+            widget, secondary_dock = available_widgets[widget_key]
+            self.add_widget(widget, secondary_dock, widget_kwargs)
+            if widget.expanding:
+                if secondary_dock:
+                    secondary_vertical_spacer = False
+                else:
+                    primary_vertical_spacer = False
         # Add vertical spacer to docks
         if primary_vertical_spacer:
             self.docked_widget_primary_layout.addItem(
@@ -215,15 +225,17 @@ class MainWindow(QtGui.QMainWindow):
 
     def set_spectrum_plot_widget(self):
         self.spectrum_plot_widget.clear()  # Remove all items (past frame headers)
-        min_x, max_x = None, None
+        min_x, max_x, n_x = None, None, None
         for i, (name, x) in enumerate(zip(self.instrument.spectrum_plot_trace_names,
                                           self.instrument.spectrum_plot_x_values)):
                 min_x = min(min_x, min(x)) if min_x is not None else (min(x) if len(x) > 0 else 0)
                 max_x = max(max_x, max(x)) if max_x is not None else (max(x) if len(x) > 0 else 10)
+                n_x = max(n_x, len(x)) if n_x is not None else len(x)
                 self.spectrum_plot_widget.addItem(pg.PlotCurveItem(
                     pen=pg.mkPen(color=COLOR_SET[i % len(COLOR_SET)], width=2), name=name))
         min_x = 0 if min_x is None else min_x
         max_x = 1 if max_x is None else max_x
+        n_x = 1 if n_x is None else n_x
         self.spectrum_plot_widget.setXRange(min_x, max_x)
         if hasattr(self.instrument, 'spectrum_plot_x_label'):
             x_label_name, x_label_units = self.instrument.spectrum_plot_x_label
@@ -231,7 +243,8 @@ class MainWindow(QtGui.QMainWindow):
         if hasattr(self.instrument, 'spectrum_plot_y_label'):
             y_label_name, y_label_units = self.instrument.spectrum_plot_y_label
             self.spectrum_plot_widget.plotItem.setLabel('left', y_label_name, units=y_label_units)
-        self.spectrum_plot_widget.setLimits(minXRange=min_x, maxXRange=max_x)
+        x_range = max_x - min_x
+        self.spectrum_plot_widget.setLimits(minXRange=x_range / n_x, maxXRange=x_range)
 
     def set_clock(self):
         zulu = gmtime(time())
@@ -408,40 +421,68 @@ class MainWindow(QtGui.QMainWindow):
             self.packets_corrupted_flag = True
         self.last_packet_corrupted_timestamp = ts
 
-    @QtCore.pyqtSlot(list, float)
-    @QtCore.pyqtSlot(np.ndarray, float)
-    def on_new_ts_data(self, data, timestamp):
-        if len(self._buffer_data) != len(data) or self.reset_ts_trace:
+
+    def reset_ts(self, data, reset):
+        n = len(data)
+        if reset or len(self._buffer_data) != len(data) or self.reset_ts_trace:
             self.reset_ts_trace = False
+            # Init legend
+            if hasattr(self.instrument, 'widget_active_timeseries_variables_selected'):
+                legend = self.instrument.widget_active_timeseries_variables_selected[
+                         :]  # Shallow copy to prevent update
+            else:
+                legend = [f"{name} ({units})" for name, units in
+                          zip(self.instrument.variable_names, self.instrument.variable_units)]
+            # Check data is correct length
+            if len(legend) != n:
+                # Possible in rare instance widget_active_timeseries_variables_selected is updated by user after the data is received and updated
+                logger.warning('Variables selected do not match data received. Skip timeseries update.')
+                self.reset_ts_trace = True
+                return
             # Init buffers
             self._buffer_timestamp = RingBuffer(self.BUFFER_LENGTH)
             self._buffer_data = [RingBuffer(self.BUFFER_LENGTH) for i in range(len(data))]
             # Re-initialize Plot (need to do so when number of curve changes)
-            # TODO FIX HERE for multiple plots
             self.timeseries_plot_widget.clear()
-            # new_plot_widget = self.create_timeseries_plot_widget()
-            # self.centralwidget.layout().replaceWidget(self.timeseries_plot_widget, new_plot_widget)
-            # self.timeseries_plot_widget = new_plot_widget
             # Init curves
-            if hasattr(self.instrument, 'widget_active_timeseries_variables_selected'):
-                legend = self.instrument.widget_active_timeseries_variables_selected
-            else:
-                legend = [f"{name} ({units})" for name, units in
-                          zip(self.instrument.variable_names, self.instrument.variable_units)]
-            for i in range(len(data)):
+            for i in range(n):
                 self.timeseries_plot_widget.plotItem.addItem(
                     pg.PlotCurveItem(pen=pg.mkPen(color=self.PEN_COLORS[i % len(self.PEN_COLORS)], width=2),
                                      name=legend[i])
                 )
+
+    @QtCore.pyqtSlot(list, float)
+    @QtCore.pyqtSlot(np.ndarray, float)
+    @QtCore.pyqtSlot(list, float, bool)
+    @QtCore.pyqtSlot(np.ndarray, float, bool)
+    def on_new_ts_data(self, data, timestamp, reset=False):
+        if self.instrument.widget_select_channel_enabled:
+            # Select channel widget enabled, hence user can change channels while receiving data
+            if self.instrument.active_timeseries_variables_lock.acquire(timeout=0.25):
+                try:
+                    self.reset_ts(data, reset)
+                finally:
+                    self.instrument.active_timeseries_variables_lock.release()
+            else:
+                if reset or len(self._buffer_data) != len(data) or self.reset_ts_trace:
+                    logger.warning('Unable to acquire lock to update timeseries variables.')
+                    self.reset_ts_trace = True
+                    return
+        else:
+            # No select channel widget, hence user can't change channels while receiving data
+            self.reset_ts(data, reset)
+        n = len(data)
         # Update buffers
+        if n == 0: # Nothing to update (won't trigger reset)
+            return
         self._buffer_timestamp.extend(timestamp)
-        for i in range(len(data)):
+        for i in range(n):
             self._buffer_data[i].extend(data[i])
         # Update timeseries figure
         if time() - self.last_timeseries_plot_refresh < 1 / self.MAX_PLOT_REFRESH_RATE:
             return
         timestamp = self._buffer_timestamp.get(self.BUFFER_LENGTH)  # Not used anymore
-        for i in range(len(data)):
+        for i in range(n):
             y = self._buffer_data[i].get(self.BUFFER_LENGTH)
             x = np.arange(len(y))
             y[np.isinf(y)] = 0
@@ -643,6 +684,10 @@ class DialogInstrumentSetup(QtGui.QDialog):
             self.spinbox_analog_channel2_gain.valueChanged.connect(self.act_update_analog_channel2_input_range)
         if 'combobox_model' in self.__dict__.keys():
             self.combobox_model.currentIndexChanged.connect(self.act_activate_fields_for_adu_model)
+        if 'combobox_relay0_mode' in self.__dict__.keys():
+            self.combobox_relay0_mode.currentIndexChanged.connect(self.act_adu_update_relay1_available)
+        if 'combobox_relay2_mode' in self.__dict__.keys():
+            self.combobox_relay2_mode.currentIndexChanged.connect(self.act_adu_update_relay3_available)
 
         # Cannot use default save button as does not provide mean to correctly validate user input
         self.button_save = QtGui.QPushButton('Save')
@@ -749,10 +794,63 @@ class DialogInstrumentSetup(QtGui.QDialog):
         model = self.combobox_model.currentText()
         if model == 'ADU100':
             self.group_box_analog.setEnabled(True)
+            self.group_box_flowmeters.setEnabled(True)
+            self.checkbox_low_flow_alarm_enabled.setEnabled(True)
+            self.checkbox_relay1_enabled.setEnabled(False)
+            self.checkbox_relay1_enabled.setChecked(False)
+            self.combobox_relay1_mode.setEnabled(False)
+            self.checkbox_relay2_enabled.setEnabled(False)
+            self.checkbox_relay2_enabled.setChecked(False)
+            self.combobox_relay2_mode.setEnabled(False)
+            self.checkbox_relay3_enabled.setEnabled(False)
+            self.checkbox_relay3_enabled.setChecked(False)
+            self.combobox_relay3_mode.setEnabled(False)
         elif model in ('ADU200', 'ADU208'):
             self.group_box_analog.setEnabled(False)
+            self.group_box_flowmeters.setEnabled(True)
+            self.checkbox_low_flow_alarm_enabled.setEnabled(True)
+            if self.combobox_relay0_mode.currentText() != 'Switch (two-wire)':
+                self.checkbox_relay1_enabled.setEnabled(True)
+                self.combobox_relay1_mode.setEnabled(True)
+            self.checkbox_relay2_enabled.setEnabled(True)
+            self.combobox_relay2_mode.setEnabled(True)
+            if self.combobox_relay2_mode.currentText() != 'Switch (two-wire)':
+                self.checkbox_relay3_enabled.setEnabled(True)
+                self.combobox_relay3_mode.setEnabled(True)
+        elif model == 'ADU222':
+            self.group_box_analog.setEnabled(False)
+            self.group_box_flowmeters.setEnabled(False)
+            self.checkbox_low_flow_alarm_enabled.setEnabled(False)
+            if self.combobox_relay0_mode.currentText() != 'Switch (two-wire)':
+                self.checkbox_relay1_enabled.setEnabled(True)
+                self.combobox_relay1_mode.setEnabled(True)
+            self.checkbox_relay2_enabled.setEnabled(False)
+            self.checkbox_relay2_enabled.setChecked(False)
+            self.combobox_relay2_mode.setEnabled(False)
+            self.checkbox_relay3_enabled.setEnabled(False)
+            self.checkbox_relay3_enabled.setChecked(False)
+            self.combobox_relay3_mode.setEnabled(False)
         else:
             raise ValueError(f'Model {model} not supported.')
+
+    def act_adu_update_relay1_available(self):
+        if (self.combobox_relay0_mode.currentText() != 'Switch (two-wire)' and
+                self.combobox_model.currentText() != 'ADU100'):
+            self.checkbox_relay1_enabled.setEnabled(True)
+            self.combobox_relay1_mode.setEnabled(True)
+        else:
+            self.checkbox_relay1_enabled.setEnabled(False)
+            self.checkbox_relay1_enabled.setChecked(False)
+            self.combobox_relay1_mode.setEnabled(False)
+
+    def act_adu_update_relay3_available(self):
+        if self.combobox_relay2_mode.currentText() != 'Switch (two-wire)':
+            self.checkbox_relay3_enabled.setEnabled(True)
+            self.combobox_relay3_mode.setEnabled(True)
+        else:
+            self.checkbox_relay3_enabled.setEnabled(False)
+            self.checkbox_relay3_enabled.setChecked(False)
+            self.combobox_relay3_mode.setEnabled(False)
 
     def act_save(self):
         # Read form
@@ -768,20 +866,25 @@ class DialogInstrumentSetup(QtGui.QDialog):
             if f in ['combobox_interface', 'combobox_model', *[f'combobox_relay{i}_mode' for i in range(4)]]:
                 self.cfg[field_name] = self.__dict__[f].currentText()
             elif field_prefix in ['le', 'sb', 'dsb']:
-                value = getattr(self, f).text().strip()
-                if not field_optional and not value:
-                    empty_fields.append(field_pretty_name)
-                    continue
-                # Apply special formatting to specific variables
                 try:
-                    if 'variable_' in field_name:
+                    value = getattr(self, f).text()
+                    # Pre-format value (needed here to handle special characters of some fields)
+                    if field_name in ['terminator', 'separator']:
+                        # Space are allowed as terminator or separator
+                        value = value.encode(self.ENCODING).decode('unicode_escape').encode(self.ENCODING)
+                    else:
+                        value = value.strip()
+                    # Check if field is optional, add to warning list otherwise
+                    if not field_optional and not value:
+                        empty_fields.append(field_pretty_name)
+                        if self.cfg['module'] == 'dataq' and field_name.startswith('variable'):
+                            self.cfg[field_name] = []
+                        continue
+                    # Apply special formatting
+                    if 'variable_' in field_name:  # Generic Instrument: Variable Names, Units, Columns, Types, Precision
                         value = [v.strip() for v in value.split(',')]
                         if 'variable_columns' in field_name:
                             value = [int(x) for x in value]
-                    elif field_name in ['terminator', 'separator']:
-                        # if len(value) > 3 and (value[:1] == "b'" and value[-1] == "'"):
-                        #     value = bytes(value[2:-1], 'ascii')
-                        value = value.strip().encode(self.ENCODING).decode('unicode_escape').encode(self.ENCODING)
                     elif field_prefix == 'sb':  # SpinBox
                         # a spinbox will contain either an int or float
                         try:
@@ -790,8 +893,6 @@ class DialogInstrumentSetup(QtGui.QDialog):
                             value = float(value)
                     elif field_prefix == 'dsb':  # DoubleSpinBox
                         value = float(value)
-                    else:
-                        value.strip()
                 except:
                     self.notification('Unable to parse special variable: ' + field_pretty_name, sys.exc_info()[0])
                     return
@@ -800,6 +901,8 @@ class DialogInstrumentSetup(QtGui.QDialog):
                 value = getattr(self, f).toPlainText().strip()
                 if not value:
                     empty_fields.append(field_pretty_name)
+                    if self.cfg['module'] == 'dataq' and field_name.startswith('variable'):
+                        self.cfg[field_name] = []
                     continue
                 try:
                     value = [v.strip() for v in value.split(',')]
@@ -810,8 +913,18 @@ class DialogInstrumentSetup(QtGui.QDialog):
             elif field_prefix == 'combobox':
                 if getattr(self, f).currentText() == 'on':
                     self.cfg[field_name] = True
-                else:
+                elif getattr(self, f).currentText() == 'off':
                     self.cfg[field_name] = False
+                else:
+                    value = getattr(self, f).currentText()
+                    try:
+                        value = int(value)
+                    except ValueError:
+                        try:
+                            value = float(value)
+                        except ValueError:
+                            pass  # Type is string
+                    self.cfg[field_name] = value
             elif field_prefix == 'cb':
                 self.cfg[field_name] = getattr(self, f).isChecked()
         if self.cfg['module'] == 'dataq':
@@ -881,7 +994,12 @@ class DialogInstrumentSetup(QtGui.QDialog):
                 self.cfg['log_products'] = True
         elif self.cfg['module'] == 'ontrak':
             self.cfg['model'] = self.combobox_model.currentText()
-            self.cfg['relay0_enabled'] = self.checkbox_relay0_enabled.isChecked()
+            for c in range(4):
+                self.cfg['relay%d_enabled' % c] = getattr(self, 'checkbox_relay%d_enabled' % c).isChecked()
+            if (self.cfg['model'] == 'ADU100' and
+                    self.cfg['relay0_enabled'] and self.cfg['relay0_mode'] == 'Switch (two-wire)'):
+                self.notification('Switch (two-wire) is not supported by ADU100.')
+                return
             self.cfg['event_counter_channels_enabled'], self.cfg['event_counter_k_factors'] = [], []
             for c in range(4):
                 if getattr(self, 'checkbox_event_counter_channel%d_enabled' % (c)).isChecked():
@@ -896,16 +1014,20 @@ class DialogInstrumentSetup(QtGui.QDialog):
                     g = getattr(self, 'spinbox_analog_channel%d_gain' % (c)).value()
                     self.cfg['analog_channels_gains'].append(g)
             if not (self.cfg['relay0_enabled'] or self.cfg['event_counter_channels_enabled'] or
-                    (self.cfg['model'] == 'ADU100' and self.cfg['analog_channels_enabled'])):
+                    (self.cfg['model'] == 'ADU100' and self.cfg['analog_channels_enabled']) or
+                    (self.cfg['model'] != 'ADU100' and (self.cfg['relay1_enabled'] or self.cfg['relay2_enabled'] or
+                                                        self.cfg['relay3_enabled']))):
                 self.notification('At least one switch, one flowmeter, or one analog channel must be selected.')
                 return
             if not (self.cfg['log_raw'] or self.cfg['log_products']):
-                self.notification('Warning: no data will be logged.')
+                self.notification('No data will be logged.')
         elif self.cfg['module'] == 'dataq':
             self.cfg['channels_enabled'] = []
+            self.cfg['channels_names'] = [None] * 8
             for c in range(8):
                 if getattr(self, 'checkbox_channel%d_enabled' % (c+1)).isChecked():
                     self.cfg['channels_enabled'].append(c)
+                self.cfg['channels_names'][c] = getattr(self, 'optional_le_channel%d_name' % (c+1)).text()
             if not self.cfg['channels_enabled']:
                 self.notification('At least one channel must be enabled.', 'Nothing to log if no channels are enabled.')
                 return
@@ -1059,23 +1181,31 @@ class DialogInstrumentUpdate(DialogInstrumentSetup):
                 else:
                     getattr(self, 'te_' + k).setPlainText(v)
             elif hasattr(self, 'combobox_' + k):
-                if v:
-                    getattr(self, 'combobox_' + k).setCurrentIndex(0)
+                cb = getattr(self, 'combobox_' + k)
+                if isinstance(v, bool):
+                    cb.setCurrentIndex(0 if v else 1)
                 else:
-                    getattr(self, 'combobox_' + k).setCurrentIndex(1)
+                    try:
+                        cb.setCurrentIndex([cb.itemText(i) for i in range(cb.count())].index(str(v)))
+                    except ValueError:
+                        logger.warning(f'Value {v} not available in GUI for parameter {k}. GUI set to GUI default.')
             elif hasattr(self, 'dsb_' + k):
                 # double spin box
-                getattr(self, 'dsb_' + k).setValue(self.cfg[k])
+                getattr(self, 'dsb_' + k).setValue(v)
             elif hasattr(self, 'sb_' + k):
                 # spin box
-                getattr(self, 'sb_' + k).setValue(self.cfg[k])
+                getattr(self, 'sb_' + k).setValue(v)
             elif hasattr(self, 'cb_' + k):
                 # check boxes
-                getattr(self, 'cb_' + k).setChecked(self.cfg[k])
+                getattr(self, 'cb_' + k).setChecked(v)
         # Populate special fields specific to each module
         if self.cfg['module'] == 'dataq':
             for c in self.cfg['channels_enabled']:
                 getattr(self, 'checkbox_channel%d_enabled' % (c + 1)).setChecked(True)
+            if 'channels_names' in self.cfg:
+                for c, name in enumerate(self.cfg['channels_names']):
+                    if name is not None:
+                        getattr(self, 'optional_le_channel%d_name' % (c + 1)).setText(name)
             # Handle legacy configuration
             for k in [k for k in self.cfg.keys() if k.startswith('variable_')]:
                 if len(self.cfg[k]) == 1 and self.cfg[k][0] == '':
@@ -1087,14 +1217,15 @@ class DialogInstrumentUpdate(DialogInstrumentSetup):
                                                     .index(self.cfg['model']))
             except ValueError:
                 logger.warning('Configured model not available in GUI. Interface set to GUI default.')
-            self.act_activate_fields_for_adu_model()
-            try:
-                self.combobox_relay0_mode.setCurrentIndex([self.combobox_relay0_mode.itemText(i)
-                                                           for i in range(self.combobox_relay0_mode.count())]
-                                                          .index(self.cfg['relay0_mode']))
-            except ValueError:
-                logger.warning('Configured relay0_mode not available in GUI. Interface set to GUI default.')
-            self.checkbox_relay0_enabled.setChecked(self.cfg['relay0_enabled'])
+            for r in range(4):
+                try:
+                    cb_relay_mode = getattr(self, f'combobox_relay{r}_mode')
+                    cb_relay_mode.setCurrentIndex([cb_relay_mode.itemText(i) for i in range(cb_relay_mode.count())]
+                                                  .index(self.cfg[f'relay{r}_mode']))
+                except ValueError:
+                    logger.warning(f'Configured relay{r}_mode not available in GUI. Interface set to GUI default.')
+                getattr(self, f'checkbox_relay{r}_enabled').setChecked(
+                    self.cfg[f'relay{r}_enabled'] if f'relay{r}_enabled' in self.cfg.keys() else False)
             for c, g in zip(self.cfg['event_counter_channels_enabled'], self.cfg['event_counter_k_factors']):
                 getattr(self, 'checkbox_event_counter_channel%d_enabled' % (c)).setChecked(True)
                 getattr(self, 'spinbox_event_counter_channel%d_k_factor' % (c)).setValue(g)
@@ -1103,6 +1234,7 @@ class DialogInstrumentUpdate(DialogInstrumentSetup):
             for c, g in zip(self.cfg['analog_channels_enabled'], self.cfg['analog_channels_gains']):
                 getattr(self, 'checkbox_analog_channel%d_enabled' % (c)).setChecked(True)
                 getattr(self, 'spinbox_analog_channel%d_gain' % (c)).setValue(g)
+            self.act_activate_fields_for_adu_model()
         if hasattr(self, 'combobox_interface'):
             if 'interface' in self.cfg.keys():
                 try:
@@ -1137,7 +1269,7 @@ class DialogSerialConnection(QtGui.QDialog):
         self.button_box.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(self.reject)
         # Update ports list
         self.ports = list_serial_comports()
-        # self.ports.append(type('obj', (object,), {'device': '/dev/ttys001', 'product': 'macOS Virtual Serial', 'description': 'n/a'}))  # Debug macOS serial
+        self.ports.append(type('obj', (object,), {'device': '/dev/ttys004', 'product': 'macOS Virtual Serial', 'description': 'n/a'}))  # Debug macOS serial
         ports_device = []
         for p in self.ports:
             # print(f'\n\n===\n{p.description}\n{p.device}\n{p.hwid}\n{p.interface}\n{p.location}\n{p.manufacturer}\n{p.name}\n{p.pid}\n{p.product}\n{p.serial_number}\n{p.vid}')
