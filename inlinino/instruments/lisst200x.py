@@ -44,7 +44,7 @@ class LISST200X(Instrument):
         self.setup(cfg)
         self._parser = LISST200XParser()
 
-    def setup(self, cfg):
+    def setup(self, cfg, **kwargs):
         # Overload cfg with LISST specific parameters
         cfg['variable_names'] = ['c']
         cfg['variable_units'] = ['-']
