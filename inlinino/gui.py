@@ -44,6 +44,7 @@ from inlinino.widgets.select_channel import SelectChannelWidget
 
 logger = logging.getLogger('GUI')
 
+print("This is the updated code.")
 
 def seconds_to_strmmss(seconds):
     min = floor(seconds / 60)
@@ -615,6 +616,7 @@ class DialogStartUp(QtGui.QDialog):
         self.done(self.LOAD_INSTRUMENT)
 
     def act_setup_instrument(self):
+        print('load new instrument')
         self.selected_template = self.instruments_to_setup[self.combo_box_instrument_to_setup.currentIndex()]
         self.done(self.SETUP_INSTRUMENT)
 
@@ -973,6 +975,7 @@ class DialogInstrumentSetup(QtGui.QDialog):
             if 'log_products' not in self.cfg.keys():
                 self.cfg['log_products'] = True
         elif self.cfg['module'] == 'lisst':
+            print('lisst opens')
             self.cfg['manufacturer'] = 'Sequoia'
             self.cfg['model'] = 'LISST'
             try:
