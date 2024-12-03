@@ -27,13 +27,13 @@ from inlinino.instruments.hyperbb import HyperBB
 from inlinino.instruments.hydroscat import HydroScat
 from inlinino.instruments.hypernav import HyperNav, read_manufacturer_pixel_registration
 from inlinino.instruments.lisst import LISST
+from inlinino.instruments.lisst200x import LISST200X
 from inlinino.instruments.nmea import NMEA
 from inlinino.instruments.ontrak import Ontrak, USBADUHIDInterface
 from inlinino.instruments.satlantic import Satlantic
 from inlinino.instruments.suna import SunaV1, SunaV2
 from inlinino.instruments.taratsg import TaraTSG
 from inlinino.instruments.lisst import LISSTParser
-from inlinino.instruments.lisst200x import LISST200XParser, LISST200X
 from inlinino.widgets.aux_data import AuxDataWidget
 from inlinino.widgets.flow_control import FlowControlWidget
 from inlinino.widgets.hypernav import HyperNavCalWidget
@@ -987,7 +987,7 @@ class DialogInstrumentSetup(QtGui.QDialog):
                 self.cfg['log_products'] = True
         elif self.cfg['module'] == 'lisst200X':
             self.cfg['manufacturer'] = 'Sequoia'
-            self.cfg['model'] = 'LISST200'
+            self.cfg['model'] = 'LISST200X'
             if 'log_raw' not in self.cfg.keys():
                 self.cfg['log_raw'] = True
             if 'log_products' not in self.cfg.keys():

@@ -1,3 +1,4 @@
 __pycache__
-logs
-databuild/
+logs/
+data/
+build/
