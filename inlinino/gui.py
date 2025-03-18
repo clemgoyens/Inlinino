@@ -34,6 +34,7 @@ from inlinino.instruments.satlantic import Satlantic
 from inlinino.instruments.suna import SunaV1, SunaV2
 from inlinino.instruments.taratsg import TaraTSG
 from inlinino.instruments.lisst import LISSTParser
+from inlinino.instruments.lisst200x import LISST200XParser
 from inlinino.widgets.aux_data import AuxDataWidget
 from inlinino.widgets.flow_control import FlowControlWidget
 from inlinino.widgets.hypernav import HyperNavCalWidget
@@ -598,6 +599,7 @@ class DialogStartUp(QtGui.QDialog):
     def __init__(self):
         super(DialogStartUp, self).__init__()
         uic.loadUi(os.path.join(PATH_TO_RESOURCES, 'startup.ui'), self)
+        print(CFG.instruments.values())
         instruments_configured = [i["manufacturer"] + ' ' + i["model"] + ' ' + i["serial_number"]
                                   for i in CFG.instruments.values()]
         self.instrument_uuids = [k for k in CFG.instruments.keys()]
@@ -975,7 +977,6 @@ class DialogInstrumentSetup(QtGui.QDialog):
             if 'log_products' not in self.cfg.keys():
                 self.cfg['log_products'] = True
         elif self.cfg['module'] == 'lisst':
-            print('lisst opens')
             self.cfg['manufacturer'] = 'Sequoia'
             self.cfg['model'] = 'LISST'
             try:
@@ -988,13 +989,20 @@ class DialogInstrumentSetup(QtGui.QDialog):
                 self.cfg['log_raw'] = True
             if 'log_products' not in self.cfg.keys():
                 self.cfg['log_products'] = True
-        elif self.cfg['module'] == 'lisst200X':
+        elif self.cfg['module'] == 'lisst200':
             self.cfg['manufacturer'] = 'Sequoia'
             self.cfg['model'] = 'LISST200X'
+            try:
+                self.cfg['serial_number'] = str(LISSTParser(self.cfg['device_file'], self.cfg['ini_file'],
+                                                            self.cfg['dcal_file'], self.cfg['zsc_file']).serial_number)
+            except:
+                self.notification('Unable to parse lisst device, ini, dcal, or zsc file.')
+                return
             if 'log_raw' not in self.cfg.keys():
                 self.cfg['log_raw'] = True
             if 'log_products' not in self.cfg.keys():
                 self.cfg['log_products'] = True
+            
         elif self.cfg['module'] == 'ontrak':
             self.cfg['model'] = self.combobox_model.currentText()
             for c in range(4):
@@ -1499,7 +1507,7 @@ class App(QtGui.QApplication):
             try:
                 instrument_class = {'generic': Instrument, 'acs': ACS, 'apogee': ApogeeQuantumSensor,
                                     'dataq': DATAQ, 'hydroscat': HydroScat, 'hyperbb': HyperBB, 'hypernav': HyperNav,
-                                    'lisst': LISST, 'nmea': NMEA, 'lisst200x': LISST200X,
+                                    'lisst': LISST, 'nmea': NMEA, 'lisst200': LISST200X,
                                     'ontrak': Ontrak,
                                     'satlantic': Satlantic,
                                     'sunav1': SunaV1, 'sunav2': SunaV2, 'taratsg': TaraTSG}
