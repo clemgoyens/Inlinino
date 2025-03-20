@@ -4,7 +4,7 @@ import configparser
 import numpy as np
 from time import sleep
 from threading import Lock
-
+import threading
 
 class LISST200X(Instrument):
     REQUIRED_CFG_FIELDS = ['model', 'serial_number', 'module',
@@ -15,7 +15,7 @@ class LISST200X(Instrument):
         super().__init__(uuid, cfg, signal, setup=False, *args, **kwargs)
         # Instrument Specific attributes
         self._parser = None
-        self._received_packet = False  # Used to query new measurement
+        self._received_packet = False  # Used to 
         # Default serial communication parameters
         self.default_serial_baudrate = 9600
         self.default_serial_timeout = 10
@@ -39,20 +39,25 @@ class LISST200X(Instrument):
         
         # Setup
         self.setup(cfg)
-        
+
         
         
     def setup(self, cfg, **kwargs):
 
         self._parser = LISST200XParser()
 
+        
         # Overload cfg with LISST specific parameters
         cfg['variable_names'] = ['beta']
         cfg['variable_names'].extend(self._parser.AUX_NAMES)
         cfg['variable_units'] = ['counts\tangle=' + ' '.join('%.2f' % x for x in self._parser.angles)]
         cfg['variable_units'].extend(self._parser.aux_units)
-        cfg['variable_precision'] = ['%s', '%.6f', '%.2f', '%.2f', '%.6f', '%.2f', '%.2f', "%.6f"]
+        # cfg['variable_precision'] = ['%s', '%.6f', '%.2f', '%.2f', '%.6f', '%.2f', '%.2f', "%.6f"]
+        cfg['variable_precision'] = ["%s"]
+        cfg['variable_precision'] += ["%.6f"] * len(self._parser.AUX_NAMES) #['%s', '%.6f', '%.2f', '%.2f', '%.6f', '%.2f', '%.2f', "%.6f"]
         cfg['terminator'] = b'L200x:>'
+
+        
         # Set standard configuration and check cfg input
         super().setup(cfg)
         # Update logger configuration
@@ -70,7 +75,7 @@ class LISST200X(Instrument):
             channel_name = 'beta(%.5f)' % self._parser.angles[np.argmin(np.abs(self._parser.angles - theta))]
             self.update_active_timeseries_variables(channel_name, True)
         # Update Auxiliary widget
-        self.widget_aux_data_variables_selected = [0, 3, 5] # variables selected out the list from AUX not all!
+        self.widget_aux_data_variables_selected = [0, 3, 5] # laser power, temperature, battery
         self.widget_aux_data_variable_names = [self._parser.AUX_NAMES[i] + ' (' + self._parser.aux_units[i] + ')'
                                                for i in self.widget_aux_data_variables_selected]
 
@@ -78,71 +83,153 @@ class LISST200X(Instrument):
     def parse(self, packet):
         return (self._parser.unpack_packet(packet),)
 
+    # def handle_packet(self, packet, timestamp):
+    #     self._received_packet = True
+    #     super().handle_packet(packet, timestamp) # using super you keep the handle_packet from __init__?
+
+
     def handle_packet(self, packet, timestamp):
         self._received_packet = True
-        super().handle_packet(packet, timestamp)
+        data = self.parse(packet)
+        if data:
+            self.handle_data(data, timestamp)  # Call the overridden method directly!
 
 
-    def handle_data(self, raw, timestamp):
-        raw = raw[0]  # data is numpy array passed as tuple to go through handle_packet of generic module
-        # Apply calibration
-        beta, c, aux = self._parser.calibrate(raw)
-        data = [raw[:35]] + aux.tolist()  # Write uncalibrated beta and calibrated auxiliaries
-        # Update plots
-        print(data)
+
+    def handle_packet(self, packet, timestamp):
+
+        self._received_packet = True
+    
+        try:
+            data = self._parser.unpack_packet(packet)
+    
+            # If it's a battery packet, update voltage reading
+            if isinstance(data, tuple) and len(data) == 2:
+                scan_number, battery_voltage = data
+                self.latest_battery_voltage = battery_voltage
+                self.latest_scan_number = scan_number
+
+                print(f"Battery voltage updated: {battery_voltage}V")
+                
+    
+            else:
+                # For regular data packets, pass the raw data to handle_data()
+                self.handle_data(data, timestamp)
+    
+        except Exception as e:
+            print(f"Failed to handle packet: {e}")
+
+
+    def handle_data(self, raw_data, timestamp):
+        raw_data = raw_data[0] if isinstance(raw_data, tuple) else raw_data
+    
+        # Calibrate the data ONCE here
+        beta, c, aux = self._parser.calibrate(raw_data)
+    
+        # Append battery voltage to the last two aux columns if available
+        if self.latest_battery_voltage is not None:
+            if aux.shape[0] >= 2:
+                aux[-2] = self.latest_battery_voltage
+                aux[-1] = self.latest_scan_number
+                print(f"Battery voltage added to last two aux columns: {aux[-2:]}")
+            else:
+                print("Warning: Aux data too short to append battery voltage.")
+    
+        # Prepare data for logging and display
+        data = [raw_data[:35]] + aux.tolist()
+    
+        # Emit signals for timeseries, aux data, and spectrum data
         if self.active_timeseries_variables_lock.acquire(timeout=0.5):
             try:
-                self.signal.new_ts_data[object, float, bool].emit(beta[self.active_timeseries_angles], timestamp,
-                                                                  self.active_timeseries_variables_reset)
-                self.active_timeseries_variables_reset = False  # Reset here as potentially set by update_active_timeseries_variables
+                self.signal.new_ts_data[object, float, bool].emit(
+                    beta[self.active_timeseries_angles], timestamp, self.active_timeseries_variables_reset
+                )
+                self.active_timeseries_variables_reset = False
             finally:
                 self.active_timeseries_variables_lock.release()
         else:
             self.logger.error('Unable to acquire lock to update timeseries plot')
-        self.signal.new_aux_data.emit(self.format_aux_data([data[i+1] for i in self.widget_aux_data_variables_selected]))
+    
+        self.signal.new_aux_data.emit(
+            self.format_aux_data([data[i + 1] for i in self.widget_aux_data_variables_selected])
+        )
         self.signal.new_spectrum_data.emit([beta])
-        # Log raw beta and calibrated aux
+    
+        # Log raw data with updated aux (battery included)
         if self.log_prod_enabled and self._log_active:
-            # np arrays must be pre-formated to be written
             data[0] = np.array2string(data[0], threshold=np.inf, max_line_width=np.inf)
             self._log_prod.write(data, timestamp)
             if not self.log_raw_enabled:
                 self.signal.packet_logged.emit()
+    
+        print(f"Final processed data (aux with battery): {aux}")
 
     def init_interface(self):
-        # Configuration commands
-        self._interface.write(b'OM 1' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
-        self._interface.write(b'BI 6' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
-        self._interface.write(b'SB 1' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
-        self._interface.write(b'SI 6' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
-        self._interface.write(b'MA 250' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
-        self._interface.write(b'XR 3' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
-        sleep(0.1)
+        try:
+            commands = [b'OM 1', b'BI 6', b'SB 1', b'SI 6', b'MA 250', b'XR 3\n']
+            for cmd in commands:
+                self._interface.write(cmd + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
+                sleep(0.1)
         
-        # TODO Check if OM, BI, SB, SI commands are necessary
-        # TODO Check if configuration is correct
-        #self._interface.write(b'OM 1' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))    # Operating Mode: Real Time
-        #self._interface.write(b'BI 6' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))    # Seconds between Bursts: 6
-        #self._interface.write(b'SB 1' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))    # Samples per Burst: 1
-        #self._interface.write(b'SI 6' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))    # Seconds between Samples: 6
-        #self._interface.write(b'MA 250' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))  # Measurements per Average: 250
-        #sleep(0.1)
-        response = self._interface.read()
-        print('this is response')
-        print(response)
-        # Query first data
-        self._interface.write(b'GX' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
-        self._interface.write(b'GX' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
+            # Flush any stale data
+            self._interface._serial.reset_input_buffer()
+            # self._interface.reset_input_buffer()
+            sleep(0.5)
+        
+            # Kickstart LISST200X data flow
+            self._interface.write(b'GX\n' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
+            print("LISST200X initialized and data request sent")
+        
+        except Exception as e:
+            print(f"Failed to initialize LISST200X: {e}")
+    
+    def data_received(self, data, timestamp):
+        try:
+            # Rebuild broken lines and clean null bytes
+            self._buffer.extend(data.replace(b'\x00', b''))
+    
+            # Look for complete LISST200X lines
+            while b'\n' in self._buffer:
+                line, self._buffer = self._buffer.split(b'\n', 1)
+                line = line.decode('utf-8', errors='ignore').strip()
+                self.handle_packet(line, timestamp)
+                if not line:
+                    continue    
+                try:
+                    self.parse_lisst200x_data(line, timestamp)
+                except ValueError as ve:
+                    self.logger.error(f"Failed to parse LISST200X data line: {line} — {ve}")
 
+        except Exception as e:
+            self.logger.exception(f"Error processing LISST200X data: {e}")
+    
+    def parse_lisst200x_data(self, line, timestamp):
+        """Parse LISST200X data line format."""
+        try:
+            if ',' in line:
+                values = line.split(',')
+                # Emit signal or store parsed data
+            else:
+                print(f"Unrecognized LISST200X line: {line}")
+    
+        except Exception as e:
+            print(f"Failed to parse LISST200X data: {e}")
+            
+            values = line.split(',')
 
-    def write_to_interface(self):
-        if self._received_packet:
-            self._received_packet = False
-            self._interface.write(b'GX' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
 
     @staticmethod
     def format_aux_data(data):
-        return ['%.2f' % v for v in data]
+        """Formats auxiliary data for display, handling numeric and string values."""
+        formatted_data = []
+        for v in data:
+            try:
+                # Try to format as a float with 2 decimal places
+                formatted_data.append('%.2f' % float(v))
+            except ValueError:
+                # If it fails (e.g., "11.55V"), keep it as a string
+                formatted_data.append(str(v).strip())
+        return formatted_data
 
     def update_active_timeseries_variables(self, name, state):
         if not ((state and name not in self.widget_active_timeseries_variables_selected) or
@@ -163,17 +250,28 @@ class LISST200X(Instrument):
 
 
 class LISST200XParser():
+    # ENCODING = 'utf-8'
+    # UNICODE_HANDLING = 'replace'
+    # LINE_ENDING = '\r\n'
+    # AUX_NAMES = ['laser_power', 'laser_reference','temperature']
+    # AUX_N = len(AUX_NAMES)-1
+    # aux_units=['counts', 'counts', 'counts']
+    # INDEX_YY_M = [42, 43]
+    # INDEX_DD_HH = [i + 1 for i in INDEX_YY_M]
+    # INDEX_MM_SS = [i + 1 for i in INDEX_DD_HH]
+    # INDEX_LASER_POWER, INDEX_LASER_REFERENCE, INDEX_TEMPERATURE = 36, 39, 41
+    
     ENCODING = 'utf-8'
     UNICODE_HANDLING = 'replace'
     LINE_ENDING = '\r\n'
-    AUX_NAMES = ['laser_power', 'laser_reference', 'depth', 'temperature',
-                 'timestamp','battery', 'ext_instr']
-    AUX_N = len(AUX_NAMES)-1
-    aux_units=['counts', 'counts', 'counts', 'counts', '-', '-', '-']
-    INDEX_YY_M = [42, 43]
+    AUX_NAMES = ['laser_power',"supply_voltage","analog_input", "laser_reference", "depth", 'temperature', "year", "month", "day","HH", "MM", "SS", "analog_input2", "Sautermean", "total_vol_concentration",
+                 "RH", "AccX", "AccY", "AccZ", "pressure", "pressure2", "NU", "NU", "NU"]
+    aux_units=['counts']*len(AUX_NAMES)
+    AUX_N = len(AUX_NAMES)
+    INDEX_YY_M = [7, 8]
     INDEX_DD_HH = [i + 1 for i in INDEX_YY_M]
     INDEX_MM_SS = [i + 1 for i in INDEX_DD_HH]
-    INDEX_LASER_POWER, INDEX_LASER_REFERENCE, INDEX_TEMPERATURE = 36, 39, 41
+    INDEX_LASER_POWER, INDEX_LASER_REFERENCE, INDEX_TEMPERATURE = 0, 3, 5
 
     def __init__(self):
         # Instrument Parameters
@@ -188,7 +286,7 @@ class LISST200XParser():
         rho = 200 ** (1 / 35)
         dynamic_range_start = 0.05
         refractive_index_water = 1.3308
-        self.angles_edges = np.logspace(0, np.log10(200), 36) * dynamic_range_start / refractive_index_water
+        self.angles_edges = np.logspace(0, np.log10(200), 37) * dynamic_range_start / refractive_index_water
         self.angles_edges_rad = self.angles_edges * np.pi / 180
         self.angles = np.sqrt(self.angles_edges[:-1] * self.angles_edges[1:])
 
@@ -212,14 +310,41 @@ class LISST200XParser():
        
     def unpack_packet(self, packet):
         try:
-            packet = packet.decode(self.ENCODING, self.UNICODE_HANDLING)
-            data = np.asarray(packet[packet.find('{')+2:packet.find('}')-1].split(self.LINE_ENDING), dtype='int')
-            print(data)
-        except Exception:
+            # Try parsing as integers (regular data packet)
+            data = np.asarray(packet.split(','), dtype='int')
+            return data
+    
+        except ValueError:
+            # If parsing fails, check for battery voltage format
+            parts = packet.split(',')
+            if len(parts) == 2 and 'V' in parts[1]:
+                scan_number = int(parts[0].strip())
+                battery_voltage = float(parts[1].replace('V', '').strip())
+                return scan_number, battery_voltage
+    
+            # If it still fails, raise the error
             raise UnexpectedPacket('Unable to parse input into numpy array')
+        
         if len(data) != 59:
             raise UnexpectedPacket('Incorrect number of variables in packet')
+        
         return data
+    
+        
+    def calibrate_auxiliaries(self, raw_aux):
+        if len(raw_aux) != self.AUX_N-1:
+            raise UnexpectedAuxiliaries('Incorrect number of auxiliary parameters')
+        aux=raw_aux
+        if raw_aux[self.INDEX_TEMPERATURE] > 32767:  # Needed to translate range 0:65535 to -32768:-32767 for signed int
+            raw_aux[self.INDEX_TEMPERATURE] = raw_aux[self.INDEX_TEMPERATURE] - 65536
+        
+        # check for the scales??
+        #aux = self.aux_scales * np.asarray(raw_aux[:self.AUX_N]) + self.aux_offs
+        
+        decimal_day = raw_aux[self.INDEX_DD_HH] // 100 + (raw_aux[self.INDEX_DD_HH] % 100) / 24 +\
+                      raw_aux[self.INDEX_MM_SS] // 100 / 1440 + (raw_aux[self.INDEX_MM_SS] % 100) / 86400
+        
+        return np.append(aux, decimal_day)
 
 
     def calibrate(self, raw):

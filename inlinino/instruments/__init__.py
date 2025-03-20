@@ -215,9 +215,6 @@ class Instrument:
                 data = self._interface.read()
                 timestamp = time()
                 if data:
-                    print('there is some data')
-                    print(data)
-
                     try:
                         self.data_received(data, timestamp)
                         if len(self._buffer) > self._max_buffer_length:
@@ -232,6 +229,7 @@ class Instrument:
                         self.logger.warning(e)
                         # raise e
                 else:
+
                     if data_received is not None and \
                             timestamp - data_received > self.DATA_TIMEOUT and data_timeout_flag is False:
                         self.logger.error(f'No data received during the past {timestamp - data_received:.2f} seconds')
@@ -239,7 +237,6 @@ class Instrument:
                         if self.signal.alarm is not None:
                             self.signal.alarm.emit(True)
                 # give instrument opportunity to write (e.g. commands) to interface
-                print('here we write to interface?')
                 self.write_to_interface()
             except IOError as e:
                 self.logger.error(e)
@@ -281,7 +278,6 @@ class Instrument:
             self._log_raw.write(packet, timestamp)
             self.signal.packet_logged.emit()
         data = self.parse(packet)
-        print(data)
         if data:
             self.handle_data(data, timestamp)
 
