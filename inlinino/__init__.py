@@ -56,7 +56,7 @@ class RingBuffer:
         # length correspond to the size of the buffer
         if _dtype is None:
             self.data = np.empty(_length)  # np.dtype = float64
-            self.data[:] = np.NAN
+            self.data[:] = np.nan
         else:
             # type needs to be compatible with np.NaN
             self.data = np.empty(_length, dtype=_dtype)
@@ -64,6 +64,7 @@ class RingBuffer:
 
     def extend(self, _x):
         # Add np.array at the end of the buffer
+        _x=np.array(_x, dtype='float64' )
         x = np.array(_x, copy=False)  # dtype=None
         step = x.size
         self.data = np.roll(self.data, -step)

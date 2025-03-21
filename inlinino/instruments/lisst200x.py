@@ -250,17 +250,7 @@ class LISST200X(Instrument):
 
 
 class LISST200XParser():
-    # ENCODING = 'utf-8'
-    # UNICODE_HANDLING = 'replace'
-    # LINE_ENDING = '\r\n'
-    # AUX_NAMES = ['laser_power', 'laser_reference','temperature']
-    # AUX_N = len(AUX_NAMES)-1
-    # aux_units=['counts', 'counts', 'counts']
-    # INDEX_YY_M = [42, 43]
-    # INDEX_DD_HH = [i + 1 for i in INDEX_YY_M]
-    # INDEX_MM_SS = [i + 1 for i in INDEX_DD_HH]
-    # INDEX_LASER_POWER, INDEX_LASER_REFERENCE, INDEX_TEMPERATURE = 36, 39, 41
-    
+
     ENCODING = 'utf-8'
     UNICODE_HANDLING = 'replace'
     LINE_ENDING = '\r\n'
