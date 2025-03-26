@@ -88,13 +88,6 @@ class LISST200X(Instrument):
     #     super().handle_packet(packet, timestamp) # using super you keep the handle_packet from __init__?
 
 
-    def handle_packet(self, packet, timestamp):
-        self._received_packet = True
-        data = self.parse(packet)
-        if data:
-            self.handle_data(data, timestamp)  # Call the overridden method directly!
-
-
 
     def handle_packet(self, packet, timestamp):
 
@@ -166,6 +159,21 @@ class LISST200X(Instrument):
 
     def init_interface(self):
         try:
+            # first read the zscat, config and ring area 
+            
+            # XZS - Sends current zscat
+            # CONFIG - Prints config. record
+            # XRINGA - Sends ring area array
+            
+            commands = [b'XZS', b'CONFIG', b'XRING']
+            
+            self._interface.write(b'XZS' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
+            self.zsc = self._interface.read_all()
+
+
+            sleep(0.1)
+            
+            
             commands = [b'OM 1', b'BI 6', b'SB 1', b'SI 6', b'MA 250', b'XR 3\n']
             for cmd in commands:
                 self._interface.write(cmd + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
@@ -254,7 +262,7 @@ class LISST200XParser():
     ENCODING = 'utf-8'
     UNICODE_HANDLING = 'replace'
     LINE_ENDING = '\r\n'
-    AUX_NAMES = ['laser_power',"supply_voltage","analog_input", "laser_reference", "depth", 'temperature', "year", "month", "day","HH", "MM", "SS", "analog_input2", "Sautermean", "total_vol_concentration",
+    AUX_NAMES = ['laser_power',"battery","analog_input", "laser_reference", "depth", 'temperature', "year", "month", "day","HH", "MM", "SS", "analog_input2", "Sautermean", "total_vol_concentration",
                  "RH", "AccX", "AccY", "AccZ", "pressure", "pressure2", "NU", "NU", "NU"]
     aux_units=['counts']*len(AUX_NAMES)
     AUX_N = len(AUX_NAMES)
@@ -263,7 +271,7 @@ class LISST200XParser():
     INDEX_MM_SS = [i + 1 for i in INDEX_DD_HH]
     INDEX_LASER_POWER, INDEX_LASER_REFERENCE, INDEX_TEMPERATURE = 0, 3, 5
 
-    def __init__(self):
+    def __init__(self, ini_file):
         # Instrument Parameters
         self.path_length = 0.025  # Instrument path length (m)
         self.phi = 1/6           # Fraction of circle covered by detectors
@@ -281,21 +289,24 @@ class LISST200XParser():
         self.angles = np.sqrt(self.angles_edges[:-1] * self.angles_edges[1:])
 
         # Auxiliary calibration parameters
-        #ini = configparser.ConfigParser()
-        #instrument_key = 'Instrument' + str(self.serial_number)
+        ini = configparser.ConfigParser()
+        ini.read(ini_file)
+        instrument_key = 'Instrument' + str(self.serial_number)
+        if instrument_key not in ini.sections():
+            raise ValueError("Initialization file (" + ini_file + ") does not contain the instrument specified in " +
+                              ini_file)
+        self.aux_labels, self.aux_units, self.aux_scales, self.aux_offs = [], [], [], []
 
-        #self.aux_labels, self.aux_units, self.aux_scales, self.aux_offs = [], [], [], []
-        #self.off = []
-        #for i in range(self.AUX_N):
-        #    self.aux_labels.append(ini[instrument_key]['HK' + str(i) + 'Label'])
-        #    self.aux_units.append(ini[instrument_key]['HK' + str(i) + 'Units'])
-        #    self.aux_scales.append(float(ini[instrument_key]['HK' + str(i) + 'Scale']))
-        #    self.aux_offs.append(float(ini[instrument_key]['HK' + str(i) + 'Off']))
-        #self.aux_scales = np.asarray(self.aux_scales)
-        #self.aux_offs = np.asarray(self.aux_offs)
-        ## Special Aux for day and time
-        #self.aux_labels.append('Day')
-        #self.aux_units.append('decimal day')
+        for i in range(0, len(['laser_power', 'battery', 'ext_instr', 'laser_reference', 'depth', 'temperature'])):
+           self.aux_labels.append(ini[instrument_key]['HK' + str(i) + 'Label'])
+           self.aux_units.append(ini[instrument_key]['HK' + str(i) + 'Units'])
+           self.aux_scales.append(float(ini[instrument_key]['HK' + str(i) + 'Scale']))
+           self.aux_offs.append(float(ini[instrument_key]['HK' + str(i) + 'Off']))
+        self.aux_scales = np.asarray(self.aux_scales)
+        self.aux_offs = np.asarray(self.aux_offs)
+        # Special Aux for day and time
+        self.aux_labels.append('Day')
+        self.aux_units.append('decimal day')
 
        
     def unpack_packet(self, packet):
@@ -322,14 +333,16 @@ class LISST200XParser():
     
         
     def calibrate_auxiliaries(self, raw_aux):
+        
+        
         if len(raw_aux) != self.AUX_N-1:
             raise UnexpectedAuxiliaries('Incorrect number of auxiliary parameters')
-        aux=raw_aux
+        
+        for idx, name in enumerate(['laser_power', 'battery', 'ext_instr', 'laser_reference', 'depth', 'temperature']):
+            aux = self.aux_scales[idx] * np.asarray(raw_aux[name]) + self.aux_offs[idx]
+
         if raw_aux[self.INDEX_TEMPERATURE] > 32767:  # Needed to translate range 0:65535 to -32768:-32767 for signed int
             raw_aux[self.INDEX_TEMPERATURE] = raw_aux[self.INDEX_TEMPERATURE] - 65536
-        
-        # check for the scales??
-        #aux = self.aux_scales * np.asarray(raw_aux[:self.AUX_N]) + self.aux_offs
         
         decimal_day = raw_aux[self.INDEX_DD_HH] // 100 + (raw_aux[self.INDEX_DD_HH] % 100) / 24 +\
                       raw_aux[self.INDEX_MM_SS] // 100 / 1440 + (raw_aux[self.INDEX_MM_SS] % 100) / 86400
