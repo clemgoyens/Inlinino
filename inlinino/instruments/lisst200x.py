@@ -169,6 +169,8 @@ class LISST200X(Instrument):
             
             self._interface.write(b'XZS' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
             self.zsc = self._interface.read_all()
+            
+            print(zsc)
 
 
             sleep(0.1)
@@ -266,6 +268,7 @@ class LISST200XParser():
                  "RH", "AccX", "AccY", "AccZ", "pressure", "pressure2", "NU", "NU", "NU"]
     aux_units=['counts']*len(AUX_NAMES)
     AUX_N = len(AUX_NAMES)
+    print(AUX_N)
     INDEX_YY_M = [7, 8]
     INDEX_DD_HH = [i + 1 for i in INDEX_YY_M]
     INDEX_MM_SS = [i + 1 for i in INDEX_DD_HH]
@@ -353,7 +356,7 @@ class LISST200XParser():
     def calibrate(self, raw):
         raw_beta, raw_aux = raw[:36], raw[36:]
         # Calibrate Auxiliaries
-        aux = self.calibrate_auxiliaries(raw_aux)
+        aux = raw_aux #self.calibrate_auxiliaries(raw_aux)
         # Calibrate VSF
         # Capture change in laser reference (to adjust for drift in laser output power over time)
         tau = aux[self.INDEX_LASER_POWER] / aux[self.INDEX_LASER_REFERENCE]
