@@ -331,6 +331,8 @@ class LISST200XParser():
         
         if len(data) != 59:
             raise UnexpectedPacket('Incorrect number of variables in packet')
+            
+        print(data)
         
         return data
     
@@ -355,6 +357,8 @@ class LISST200XParser():
 
     def calibrate(self, raw):
         raw_beta, raw_aux = raw[:36], raw[36:]
+        print(raw_beta)
+        print(raw_aux)
         # Calibrate Auxiliaries
         aux = raw_aux #self.calibrate_auxiliaries(raw_aux)
         # Calibrate VSF
