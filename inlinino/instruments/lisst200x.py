@@ -7,9 +7,11 @@ from threading import Lock
 import threading
 
 class LISST200X(Instrument):
-    REQUIRED_CFG_FIELDS = ['model', 'serial_number', 'module',
+    REQUIRED_CFG_FIELDS = ['ini_file',
+                           'model', 'serial_number', 'module',
                            'log_path', 'log_raw', 'log_products',
                            'variable_names', 'variable_units', 'variable_precision']
+
 
     def __init__(self, uuid, cfg, signal, *args, **kwargs):
         super().__init__(uuid, cfg, signal, setup=False, *args, **kwargs)
