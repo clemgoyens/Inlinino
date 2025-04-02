@@ -44,7 +44,7 @@ class LISST200X(Instrument):
         
     def setup(self, cfg, **kwargs):
 
-        self._parser = LISST200XParser()
+        self._parser = LISST200XParser(ini_file)
 
         
         # Overload cfg with LISST specific parameters
@@ -170,7 +170,7 @@ class LISST200X(Instrument):
             self._interface.write(b'XZS' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
             self.zsc = self._interface.read_all()
             
-            print(zsc)
+            print(self.zsc)
 
 
             sleep(0.1)
@@ -187,6 +187,7 @@ class LISST200X(Instrument):
             sleep(0.5)
         
             # Kickstart LISST200X data flow
+            
             self._interface.write(b'GX\n' + bytes(self._parser.LINE_ENDING, self._parser.ENCODING))
             print("LISST200X initialized and data request sent")
         
