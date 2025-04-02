@@ -115,7 +115,9 @@ class Instrument:
         if variable_keys:
             # Check length
             n = len(cfg['variable_names'])
+            print(cfg['variable_names'])
             for k in variable_keys:
+                print(cfg[k])
                 if n != len(cfg[k]):
                     raise ValueError('%s invalid length' % k)
         # Communication Interface (for retro-compatibility: default interface is serial)

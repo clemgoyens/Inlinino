@@ -48,7 +48,9 @@ class LISST200X(Instrument):
 
         self._parser = LISST200XParser(cfg['ini_file'])
 
-        
+        print(self._parser.angles)        
+        print(self._parser.aux_units)
+
         # Overload cfg with LISST specific parameters
         cfg['variable_names'] = ['beta']
         cfg['variable_names'].extend(self._parser.AUX_NAMES)
@@ -267,8 +269,8 @@ class LISST200XParser():
     ENCODING = 'utf-8'
     UNICODE_HANDLING = 'replace'
     LINE_ENDING = '\r\n'
-    AUX_NAMES = ['laser_power',"battery","analog_input", "laser_reference", "depth", 'temperature', "year", "month", "day","HH", "MM", "SS", "analog_input2", "Sautermean", "total_vol_concentration",
-                 "RH", "AccX", "AccY", "AccZ", "pressure", "pressure2", "NU", "NU", "NU"]
+    AUX_NAMES = ['laser_power', 'battery', 'ext_instr', 'laser_reference', 'depth', 'temperature', 'timestamp']#['laser_power',"battery","analog_input", "laser_reference", "depth", 'temperature', "year", "month", "day","HH", "MM", "SS", "analog_input2", "Sautermean", "total_vol_concentration",
+                # "RH", "AccX", "AccY", "AccZ", "pressure", "pressure2", "NU", "NU", "NU"]
     aux_units=['counts']*len(AUX_NAMES)
     AUX_N = len(AUX_NAMES)
     print(AUX_N)

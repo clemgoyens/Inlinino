@@ -993,8 +993,9 @@ class DialogInstrumentSetup(QtGui.QDialog):
             self.cfg['manufacturer'] = 'Sequoia'
             self.cfg['model'] = 'LISST200X'
             try:
-                self.cfg['serial_number'] = str(LISSTParser(self.cfg['device_file'], self.cfg['ini_file'],
-                                                            self.cfg['dcal_file'], self.cfg['zsc_file']).serial_number)
+                print(self.cfg['ini_file'])
+                self.cfg['serial_number'] = str(LISST200XParser(self.cfg['ini_file']).serial_number)
+                
             except:
                 self.notification('Unable to parse lisst device, ini, dcal, or zsc file.')
                 return
